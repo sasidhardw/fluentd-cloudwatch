@@ -1,0 +1,59 @@
+kind: ConfigMap
+apiVersion: v1
+metadata:
+  name: fluentd-config
+  namespace: kube-system
+data:
+  containers.input.conf: |-
+    <source>
+      type tail
+      path /var/log/containers/*.log
+      pos_file /var/log/es-containers.log.pos
+      format multiline
+      format_firstline /\d{4}-\d{1,2}-\d{1,2}/
+      format1 /^(?<time>\d{4}-\d{1,2}-\d{1,2} \d{1,2}:\d{1,2}:\d{1,2}) \[(?<thread>.*)\] (?<level>[^\s]+)(?<message>.*)/
+      time_format %Y-%m-%dT%H:%M:%S.%NZ
+      tag kubernetes.*
+      format json
+      read_from_head true
+    </source>
+    # <source>
+    # @type tail
+    # format multiline
+    # format_firstline /[0-9]{2}-[A-Za-z]{3}-[0-9]{4}/
+    # format1 /^(?<datetime>[0-9]{2}-[A-Za-z]{3}-[0-9]{4} [0-9]{2}:[0-9]{2}:[0-9]{2}.[0-9]{3}) (?<Log-Level>[A-Z]*) (?<message>.*)$/
+    # path /usr/local/tomcat/logs/catalina*,/usr/local/tomcat/logs/localhost*.log
+    # path_key tailed_tomcat_path
+    # pos_file /usr/local/tomcat/logs/tomcat.catalina.pos
+    # tag tomcat.tomcat.logs
+    #    </source>
+    #<source>
+    # @type tail
+    # format apache
+    # path /usr/local/tomcat/logs/localhost_access*
+    # path_key tailed_localhost_access_path
+    # pos_file /usr/local/tomcat/logs/tomcat.localhost.access.pos
+    # tag tomcat.localhost.access.logs
+    #</source>
+  output.conf: |-
+    # Enriches records with Kubernetes metadata
+    <filter kubernetes.**>
+      type kubernetes_metadata
+    </filter>
+
+    <filter kubernetes.**>
+      @type record_transformer
+      enable_ruby true
+      <record>
+        pod_name ${record.fetch("kubernetes", Hash.new).fetch("pod_name", "unknown_pod")}
+        container_name ${record.fetch("kubernetes", Hash.new).fetch("container_name", "unknown_container")}
+      </record>
+    </filter>
+
+    <match kubernetes.**>
+      @type cloudwatch_logs
+      log_group_name_key pod_name
+      log_stream_name_key container_name
+      auto_create_stream true
+      put_log_events_retry_limit 20
+    </match>
